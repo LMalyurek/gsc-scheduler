@@ -1,0 +1,718 @@
+USE [ProdSched]
+GO
+
+/****** Object:  StoredProcedure [sched].[usp_Erp_OperationMaterials]    Script Date: 3/5/2026 11:29:44 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+-------------------------------------------------------------------------------
+-- 8) INTEGRATION PROC: ERP -> MATERIAL LINES (DETAILS FOR CLICK-THROUGH)
+-------------------------------------------------------------------------------
+
+CREATE   PROCEDURE [sched].[usp_Erp_OperationMaterials]
+(
+      @WarehouseId            INT         = 1
+    , @DueDateLow             DATETIME    = NULL
+    , @DueDateHigh            DATETIME    = NULL
+    , @WarehouseWorkCenterId  INT         = NULL
+    , @Status                 INT         = 2
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    ;WITH WOFiltered AS
+    (
+        SELECT
+              WO.WorkOrderHeader_Id
+            , WO.Due_DateTime
+            , WO.WarehouseWorkCenter_Id
+            , WO.Warehouse_Id
+            , WO.PostedOrClosed_Flag
+        FROM [server16\Capstone].[Capstone-Production].[dbo].[WorkOrderHeader] WO WITH (NOLOCK)
+        WHERE
+            (WO.Warehouse_Id = @WarehouseId OR @WarehouseId IS NULL)
+            AND (WO.Due_DateTime >= @DueDateLow OR @DueDateLow IS NULL)
+            AND (WO.Due_DateTime <  @DueDateHigh OR @DueDateHigh IS NULL)
+            AND (WO.WarehouseWorkCenter_Id = @WarehouseWorkCenterId OR @WarehouseWorkCenterId IS NULL)
+            AND (
+                    (@Status = 1 AND WO.PostedOrClosed_Flag = 1)
+                 OR (@Status = 2 AND WO.PostedOrClosed_Flag = 0)
+                 OR (@Status IS NULL)
+                )
+    )
+    SELECT
+          CAST(WOF.WorkOrderHeader_Id AS VARCHAR(20)) + '-' + CAST(WOF.WarehouseWorkCenter_Id AS VARCHAR(20)) AS OperationKey
+        , WOF.WorkOrderHeader_Id AS WorkOrderHeaderId
+        , WOF.WarehouseWorkCenter_Id AS WorkCenterId
+        , I.WorkOrderInputDetail_Id AS WorkOrderInputDetailId
+        , It.ItemCode
+        , It.BriefDescription
+        , It.Description
+        , I.NonStandardLength
+        , I.NonStandardWidth
+        , I.ItemStandardSize_Id AS ItemStandardSizeId
+        , CASE
+            WHEN ISS.ImperialLength IS NULL OR ISS.ImperialWidth IS NULL THEN NULL
+            ELSE CAST(ISS.ImperialLength AS VARCHAR(32)) + ' x ' + CAST(ISS.ImperialWidth AS VARCHAR(32))
+          END AS StandardSize
+        , CAST(ISNULL(I.TheoreticalWeight,0) AS DECIMAL(18,2)) AS TheoreticalWeight
+    FROM WOFiltered WOF
+    INNER JOIN [server16\Capstone].[Capstone-Production].[dbo].[WorkOrderInputDetail] I WITH (NOLOCK)
+        ON WOF.WorkOrderHeader_Id = I.WorkOrderHeader_Id
+    LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[Item] It WITH (NOLOCK)
+        ON I.Input_Item_Id = It.Item_Id
+    LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[ItemStandardSize] ISS WITH (NOLOCK)
+        ON I.ItemStandardSize_Id = ISS.StandardSize_Id
+    ORDER BY WOF.WorkOrderHeader_Id, I.WorkOrderInputDetail_Id;
+END
+GO
+
+/****** Object:  StoredProcedure [sched].[usp_Erp_WorkCenterOps]    Script Date: 3/5/2026 11:29:44 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+-------------------------------------------------------------------------------
+-- 7) INTEGRATION PROC: ERP -> “WORK CENTER OPS” (ONE ROW PER WO/WORKCENTER)
+--    (This is the query your Sync proc will call locally.)
+-------------------------------------------------------------------------------
+
+CREATE   PROCEDURE [sched].[usp_Erp_WorkCenterOps]
+(
+      @WarehouseId            INT         = 1
+    , @DueDateLow             DATETIME    = NULL
+    , @DueDateHigh            DATETIME    = NULL
+    , @WarehouseWorkCenterId  INT         = NULL
+    , @ItemId                 INT         = NULL
+    , @CategoryId             INT         = NULL
+    , @CategoryGroupId        INT         = NULL
+    , @Status                 INT         = 2      -- 1=Closed/Posted, 2=Open, NULL=All
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    ;WITH WOFiltered AS
+    (
+        SELECT
+              WO.WorkOrderHeader_Id
+            , WO.PostedOrClosed_Flag
+            , WO.Created_LoginUser_Id
+            , WO.Due_DateTime
+            , WO.WarehouseWorkCenter_Id
+            , WO.Warehouse_Id
+        FROM [server16\Capstone].[Capstone-Production].[dbo].[WorkOrderHeader] WO WITH (NOLOCK)
+        WHERE
+            (WO.Warehouse_Id = @WarehouseId OR @WarehouseId IS NULL)
+            AND (WO.Due_DateTime >= @DueDateLow OR @DueDateLow IS NULL)
+            AND (WO.Due_DateTime <  @DueDateHigh OR @DueDateHigh IS NULL)
+            AND (WO.WarehouseWorkCenter_Id = @WarehouseWorkCenterId OR @WarehouseWorkCenterId IS NULL)
+            AND (
+                    (@Status = 1 AND WO.PostedOrClosed_Flag = 1)
+                 OR (@Status = 2 AND WO.PostedOrClosed_Flag = 0)
+                 OR (@Status IS NULL)
+                )
+    ),
+    Inputs AS
+    (
+        SELECT
+              I.WorkOrderHeader_Id
+            , I.WorkOrderInputDetail_Id
+            , I.Input_Item_Id
+            , I.NonStandardLength
+            , I.NonStandardWidth
+            , I.ItemStandardSize_Id
+            , ISNULL(I.TheoreticalWeight,0) AS TheoreticalWeight
+        FROM [server16\Capstone].[Capstone-Production].[dbo].[WorkOrderInputDetail] I WITH (NOLOCK)
+        INNER JOIN WOFiltered WOF
+            ON WOF.WorkOrderHeader_Id = I.WorkOrderHeader_Id
+    ),
+    SOLink AS
+    (
+        SELECT
+              Inp.WorkOrderHeader_Id
+            , MAX(SOH.SalesOrderHeader_Id) AS SalesOrderHeader_Id
+        FROM Inputs Inp
+        LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[WorkOrderOutputDetail] WOOD WITH (NOLOCK)
+            ON WOOD.WorkOrderInputDetail_Id = Inp.WorkOrderInputDetail_Id
+        LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[SalesOrderDetail] SOD WITH (NOLOCK)
+            ON WOOD.Output_SalesOrderDetail_Id = SOD.SalesOrderDetail_Id
+        LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[SalesOrderHeader] SOH WITH (NOLOCK)
+            ON SOD.SalesOrderHeader_Id = SOH.SalesOrderHeader_Id
+        GROUP BY Inp.WorkOrderHeader_Id
+    ),
+    Agg AS
+    (
+        SELECT
+              WOF.WorkOrderHeader_Id
+            , WOF.WarehouseWorkCenter_Id
+            , WOF.Due_DateTime
+            , WOF.Created_LoginUser_Id
+            , WOF.PostedOrClosed_Flag
+            , SUM(Inp.TheoreticalWeight) AS TotalInputTheoreticalWeight
+            , COUNT(DISTINCT Inp.Input_Item_Id) AS DistinctInputItemCount
+            , MAX(It.BriefDescription) AS InputMaterial
+            , MAX(
+                CASE
+                  WHEN Inp.NonStandardLength IS NULL OR Inp.NonStandardWidth IS NULL THEN NULL
+                  ELSE CAST(Inp.NonStandardLength AS VARCHAR(32)) + ' x ' +
+                       CAST(Inp.NonStandardWidth AS VARCHAR(32))
+                END
+              ) AS Size
+        FROM WOFiltered WOF
+        LEFT JOIN Inputs Inp
+            ON WOF.WorkOrderHeader_Id = Inp.WorkOrderHeader_Id
+        LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[Item] It WITH (NOLOCK)
+            ON Inp.Input_Item_Id = It.Item_Id
+        LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[Category] Cat WITH (NOLOCK)
+            ON It.Category_Id = Cat.Category_Id
+        WHERE
+            (It.Item_Id = @ItemId OR @ItemId IS NULL)
+            AND (Cat.Category_Id = @CategoryId OR @CategoryId IS NULL)
+            AND (
+                   Cat.Group1_CategoryGroup_Id = @CategoryGroupId
+                OR Cat.Group2_CategoryGroup_Id = @CategoryGroupId
+                OR Cat.Group3_CategoryGroup_Id = @CategoryGroupId
+                OR Cat.Group4_CategoryGroup_Id = @CategoryGroupId
+                OR Cat.Group5_CategoryGroup_Id = @CategoryGroupId
+                OR @CategoryGroupId IS NULL
+            )
+        GROUP BY
+              WOF.WorkOrderHeader_Id
+            , WOF.WarehouseWorkCenter_Id
+            , WOF.Due_DateTime
+            , WOF.Created_LoginUser_Id
+            , WOF.PostedOrClosed_Flag
+    )
+    SELECT
+          CAST(Agg.WorkOrderHeader_Id AS VARCHAR(20)) + '-' + CAST(Agg.WarehouseWorkCenter_Id AS VARCHAR(20)) AS OperationKey
+        , Agg.WorkOrderHeader_Id AS WorkOrderHeaderId
+        , Agg.WarehouseWorkCenter_Id AS WorkCenterId
+        , WC.Name AS WorkCenterName
+        , Agg.Due_DateTime AS DueDate
+        , Agg.InputMaterial
+        , Agg.Size
+        , Agg.DistinctInputItemCount
+        , CAST(Agg.TotalInputTheoreticalWeight AS DECIMAL(18,2)) AS InputQuantity
+        , Agg.PostedOrClosed_Flag AS PostedOrClosedFlag
+
+        , SOH.SalesOrderHeader_Id
+        , SOH.Closed_Flag AS SalesOrderClosedFlag
+        , Cust.Name AS Customer
+        , SR.Name AS SalesRep
+        , LU.Name AS WOCreatedBy
+        , SOH.TargetedDeliveryOrShipOrPickUp_DateTime AS SalesOrderTarget
+        , SOH.Ready_DateTime AS SalesOrderReady
+
+    FROM Agg
+    LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[WarehouseWorkCenter] WC WITH (NOLOCK)
+        ON Agg.WarehouseWorkCenter_Id = WC.WorkCenter_Id
+    LEFT JOIN SOLink SL
+        ON Agg.WorkOrderHeader_Id = SL.WorkOrderHeader_Id
+    LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[SalesOrderHeader] SOH WITH (NOLOCK)
+        ON SL.SalesOrderHeader_Id = SOH.SalesOrderHeader_Id
+    LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[SalesRep] SR WITH (NOLOCK)
+        ON SOH.SalesRep_Id = SR.Rep_Id
+    LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[Customer] Cust WITH (NOLOCK)
+        ON SOH.Customer_Id = Cust.Customer_Id
+    LEFT JOIN [server16\Capstone].[Capstone-Production].[dbo].[LoginUser] LU WITH (NOLOCK)
+        ON Agg.Created_LoginUser_Id = LU.LoginUser_Id
+    ORDER BY Agg.Due_DateTime, WC.Name, Agg.WorkOrderHeader_Id;
+END
+GO
+
+/****** Object:  StoredProcedure [sched].[usp_OperatorStart]    Script Date: 3/5/2026 11:29:44 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE   PROCEDURE [sched].[usp_OperatorStart]
+    @ScheduleEventId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    BEGIN TRAN;
+
+    -- Find the work center for this event
+    DECLARE @WorkCenterId INT;
+
+    SELECT @WorkCenterId = os.WorkCenterId
+    FROM sched.ScheduleEvent se
+    JOIN sched.OperationSnapshot os ON os.OperationId = se.OperationId
+    WHERE se.ScheduleEventId = @ScheduleEventId;
+
+    IF @WorkCenterId IS NULL
+    BEGIN
+        ROLLBACK;
+        RAISERROR('ScheduleEvent not found or missing OperationSnapshot.', 16, 1);
+        RETURN;
+    END
+
+    -- Lock rows for this work center and enforce only one in progress
+    IF EXISTS (
+        SELECT 1
+        FROM sched.ScheduleEvent se WITH (UPDLOCK, HOLDLOCK)
+        JOIN sched.OperationSnapshot os ON os.OperationId = se.OperationId
+        WHERE os.WorkCenterId = @WorkCenterId
+          AND se.Status = 1
+    )
+    BEGIN
+        ROLLBACK;
+        RAISERROR('Another job is already In Progress for this work center.', 16, 1);
+        RETURN;
+    END
+
+    -- Start this event (only if currently Scheduled)
+    UPDATE se
+    SET
+        se.Status = 1,
+        se.ActualStartLocal = GETDATE()
+    FROM sched.ScheduleEvent se
+    WHERE se.ScheduleEventId = @ScheduleEventId
+      AND se.Status = 0
+      AND se.ActualStartLocal IS NULL
+      AND se.ActualEndLocal IS NULL;
+
+    IF @@ROWCOUNT <> 1
+    BEGIN
+        ROLLBACK;
+        RAISERROR('Cannot start: event is not in a startable state.', 16, 1);
+        RETURN;
+    END
+
+    COMMIT;
+
+    SELECT
+        ScheduleEventId,
+        Status,
+        ActualStartLocal,
+        ActualEndLocal
+    FROM sched.ScheduleEvent
+    WHERE ScheduleEventId = @ScheduleEventId;
+END
+GO
+
+/****** Object:  StoredProcedure [sched].[usp_OperatorStop]    Script Date: 3/5/2026 11:29:44 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+CREATE   PROCEDURE [sched].[usp_OperatorStop]
+    @ScheduleEventId INT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET XACT_ABORT ON;
+
+    BEGIN TRAN;
+
+    UPDATE se
+    SET
+        se.Status = 2,
+        se.ActualEndLocal = GETDATE()
+    FROM sched.ScheduleEvent se
+    WHERE se.ScheduleEventId = @ScheduleEventId
+      AND se.Status = 1
+      AND se.ActualStartLocal IS NOT NULL
+      AND se.ActualEndLocal IS NULL;
+
+    IF @@ROWCOUNT <> 1
+    BEGIN
+        ROLLBACK;
+        RAISERROR('Cannot stop: event is not currently In Progress.', 16, 1);
+        RETURN;
+    END
+
+    COMMIT;
+
+    SELECT
+        ScheduleEventId,
+        Status,
+        ActualStartLocal,
+        ActualEndLocal
+    FROM sched.ScheduleEvent
+    WHERE ScheduleEventId = @ScheduleEventId;
+END
+GO
+
+/****** Object:  StoredProcedure [sched].[usp_SyncFromERP]    Script Date: 3/5/2026 11:29:44 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+
+-------------------------------------------------------------------------------
+-- 9) SYNC STORED PROCEDURE (UPSERT INTO SQL EXPRESS)
+-------------------------------------------------------------------------------
+
+CREATE   PROCEDURE [sched].[usp_SyncFromERP]
+(
+      @WarehouseId            INT         = 1
+    , @DueDateLow             DATETIME    = NULL
+    , @DueDateHigh            DATETIME    = NULL
+    , @WarehouseWorkCenterId  INT         = NULL
+    , @ItemId                 INT         = NULL
+    , @CategoryId             INT         = NULL
+    , @CategoryGroupId        INT         = NULL
+    , @Status                 INT         = 2
+    , @DeactivateMissing      BIT         = 1
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    DECLARE @NowUtc DATETIME2(0) = SYSUTCDATETIME();
+
+    -------------------------------------------------------------------------
+    -- Stage Ops
+    -------------------------------------------------------------------------
+    CREATE TABLE #OpsRaw
+    (
+          OperationKey            VARCHAR(64)   NOT NULL
+        , WorkOrderHeaderId       INT           NOT NULL
+        , WorkCenterId            INT           NOT NULL
+        , WorkCenterName          NVARCHAR(200) NULL
+        , DueDate                 DATETIME      NULL
+        , InputMaterial           NVARCHAR(300) NULL
+        , Size                    NVARCHAR(100) NULL
+        , DistinctInputItemCount  INT           NULL
+        , InputQuantity           DECIMAL(18,2) NULL
+        , PostedOrClosedFlag      BIT           NULL
+        , SalesOrderHeaderId      INT           NULL
+        , SalesOrderClosedFlag    BIT           NULL
+        , Customer                NVARCHAR(200) NULL
+        , SalesRep                NVARCHAR(200) NULL
+        , WOCreatedBy             NVARCHAR(200) NULL
+        , SalesOrderTarget        DATETIME      NULL
+        , SalesOrderReady         DATETIME      NULL
+    );
+
+    INSERT INTO #OpsRaw
+    EXEC sched.usp_Erp_WorkCenterOps
+          @WarehouseId           = @WarehouseId
+        , @DueDateLow            = @DueDateLow
+        , @DueDateHigh           = @DueDateHigh
+        , @WarehouseWorkCenterId = @WarehouseWorkCenterId
+        , @ItemId                = @ItemId
+        , @CategoryId            = @CategoryId
+        , @CategoryGroupId       = @CategoryGroupId
+        , @Status                = @Status;
+
+    CREATE TABLE #OpsStage
+    (
+          OperationKey            VARCHAR(64)   NOT NULL
+        , WorkOrderHeaderId       INT           NOT NULL
+        , WorkCenterId            INT           NOT NULL
+        , WorkCenterName          NVARCHAR(200) NOT NULL
+        , DueDate                 DATETIME      NULL
+        , InputMaterial           NVARCHAR(300) NULL
+        , Size                    NVARCHAR(100) NULL
+        , DistinctInputItemCount  INT           NOT NULL
+        , InputQuantity           DECIMAL(18,2) NOT NULL
+        , PostedOrClosedFlag      BIT           NULL
+        , SalesOrderHeaderId      INT           NULL
+        , SalesOrderClosedFlag    BIT           NULL
+        , Customer                NVARCHAR(200) NULL
+        , SalesRep                NVARCHAR(200) NULL
+        , WOCreatedBy             NVARCHAR(200) NULL
+        , SalesOrderTarget        DATETIME      NULL
+        , SalesOrderReady         DATETIME      NULL
+        , RowHash                 VARBINARY(32) NOT NULL
+    );
+
+    INSERT INTO #OpsStage
+    SELECT
+          r.OperationKey
+        , r.WorkOrderHeaderId
+        , r.WorkCenterId
+        , COALESCE(r.WorkCenterName, N'(Unknown)') AS WorkCenterName
+        , r.DueDate
+        , r.InputMaterial
+        , r.Size
+        , ISNULL(r.DistinctInputItemCount, 0)
+        , ISNULL(r.InputQuantity, 0)
+        , r.PostedOrClosedFlag
+        , r.SalesOrderHeaderId
+        , r.SalesOrderClosedFlag
+        , r.Customer
+        , r.SalesRep
+        , r.WOCreatedBy
+        , r.SalesOrderTarget
+        , r.SalesOrderReady
+        , HASHBYTES('SHA2_256',
+            CONCAT(
+                ISNULL(CAST(r.WorkOrderHeaderId AS NVARCHAR(20)), N''), N'|',
+                ISNULL(CAST(r.WorkCenterId AS NVARCHAR(20)), N''), N'|',
+                ISNULL(CONVERT(NVARCHAR(30), r.DueDate, 126), N''), N'|',
+                ISNULL(r.InputMaterial, N''), N'|',
+                ISNULL(r.Size, N''), N'|',
+                ISNULL(CAST(ISNULL(r.DistinctInputItemCount,0) AS NVARCHAR(20)), N''), N'|',
+                ISNULL(CAST(ISNULL(r.InputQuantity,0) AS NVARCHAR(40)), N''), N'|',
+                ISNULL(CAST(r.PostedOrClosedFlag AS NVARCHAR(5)), N''), N'|',
+                ISNULL(CAST(r.SalesOrderHeaderId AS NVARCHAR(20)), N''), N'|',
+                ISNULL(CAST(r.SalesOrderClosedFlag AS NVARCHAR(5)), N''), N'|',
+                ISNULL(r.Customer, N''), N'|',
+                ISNULL(r.SalesRep, N''), N'|',
+                ISNULL(r.WOCreatedBy, N''), N'|',
+                ISNULL(CONVERT(NVARCHAR(30), r.SalesOrderTarget, 126), N''), N'|',
+                ISNULL(CONVERT(NVARCHAR(30), r.SalesOrderReady, 126), N'')
+            )
+          ) AS RowHash
+    FROM #OpsRaw r;
+
+    -------------------------------------------------------------------------
+    -- Upsert WorkCenters
+    -------------------------------------------------------------------------
+-- Upsert WorkCenters (update name if changed; otherwise just touch LastSeenUtc)
+MERGE sched.WorkCenter AS tgt
+USING
+(
+    SELECT DISTINCT WorkCenterId, WorkCenterName
+    FROM #OpsStage
+) AS src
+ON tgt.WorkCenterId = src.WorkCenterId
+WHEN MATCHED AND tgt.WorkCenterName <> src.WorkCenterName THEN
+    UPDATE SET
+          tgt.WorkCenterName = src.WorkCenterName
+        , tgt.IsActive       = 1
+        , tgt.LastSeenUtc    = @NowUtc
+WHEN NOT MATCHED THEN
+    INSERT (WorkCenterId, WorkCenterName, IsActive, LastSeenUtc)
+    VALUES (src.WorkCenterId, src.WorkCenterName, 1, @NowUtc);
+
+-- Touch unchanged matched rows
+UPDATE wc
+   SET wc.IsActive    = 1,
+       wc.LastSeenUtc = @NowUtc
+FROM sched.WorkCenter wc
+JOIN (SELECT DISTINCT WorkCenterId FROM #OpsStage) s
+  ON s.WorkCenterId = wc.WorkCenterId;
+
+    -------------------------------------------------------------------------
+    -- Upsert OperationSnapshot (by OperationKey)
+    -------------------------------------------------------------------------
+    -- Upsert OperationSnapshot (only update full row when hash changes)
+MERGE sched.OperationSnapshot AS tgt
+USING #OpsStage AS src
+ON tgt.OperationKey = src.OperationKey
+WHEN MATCHED AND tgt.RowHash <> src.RowHash THEN
+    UPDATE SET
+          tgt.WorkOrderHeaderId      = src.WorkOrderHeaderId
+        , tgt.WorkCenterId           = src.WorkCenterId
+        , tgt.DueDate                = src.DueDate
+        , tgt.InputMaterial          = src.InputMaterial
+        , tgt.Size                   = src.Size
+        , tgt.DistinctInputItemCount = src.DistinctInputItemCount
+        , tgt.InputQuantity          = src.InputQuantity
+        , tgt.SalesOrderHeaderId     = src.SalesOrderHeaderId
+        , tgt.SalesOrderClosedFlag   = src.SalesOrderClosedFlag
+        , tgt.Customer               = src.Customer
+        , tgt.SalesRep               = src.SalesRep
+        , tgt.WOCreatedBy            = src.WOCreatedBy
+        , tgt.SalesOrderTarget       = src.SalesOrderTarget
+        , tgt.SalesOrderReady        = src.SalesOrderReady
+        , tgt.PostedOrClosedFlag     = src.PostedOrClosedFlag
+        , tgt.RowHash                = src.RowHash
+        , tgt.LastERPRefreshUtc      = @NowUtc
+        , tgt.IsActive               = 1
+        , tgt.RemovedUtc             = NULL
+WHEN NOT MATCHED THEN
+    INSERT
+    (
+          OperationKey, WorkOrderHeaderId, WorkCenterId, DueDate,
+          InputMaterial, Size, DistinctInputItemCount, InputQuantity,
+          SalesOrderHeaderId, SalesOrderClosedFlag, Customer, SalesRep, WOCreatedBy,
+          SalesOrderTarget, SalesOrderReady, PostedOrClosedFlag,
+          RowHash, LastERPRefreshUtc, IsActive
+    )
+    VALUES
+    (
+          src.OperationKey, src.WorkOrderHeaderId, src.WorkCenterId, src.DueDate,
+          src.InputMaterial, src.Size, src.DistinctInputItemCount, src.InputQuantity,
+          src.SalesOrderHeaderId, src.SalesOrderClosedFlag, src.Customer, src.SalesRep, src.WOCreatedBy,
+          src.SalesOrderTarget, src.SalesOrderReady, src.PostedOrClosedFlag,
+          src.RowHash, @NowUtc, 1
+    );
+
+-- Touch unchanged matched rows (hash same)
+UPDATE os
+   SET os.LastERPRefreshUtc = @NowUtc,
+       os.IsActive          = 1,
+       os.RemovedUtc        = NULL
+FROM sched.OperationSnapshot os
+JOIN #OpsStage s
+  ON s.OperationKey = os.OperationKey
+WHERE os.RowHash = s.RowHash;
+
+    -------------------------------------------------------------------------
+    -- Deactivate missing operations (optional, safe soft-delete)
+    -- Only deactivates operations not seen in this pull.
+    -------------------------------------------------------------------------
+    IF @DeactivateMissing = 1
+    BEGIN
+        UPDATE tgt
+            SET tgt.IsActive = 0,
+                tgt.RemovedUtc = COALESCE(tgt.RemovedUtc, @NowUtc)
+        FROM sched.OperationSnapshot tgt
+        LEFT JOIN #OpsStage src
+            ON src.OperationKey = tgt.OperationKey
+        WHERE src.OperationKey IS NULL
+          AND tgt.IsActive = 1;
+    END
+
+    -------------------------------------------------------------------------
+    -- Stage Materials (details)
+    -------------------------------------------------------------------------
+    CREATE TABLE #MatRaw
+    (
+          OperationKey            VARCHAR(64)   NOT NULL
+        , WorkOrderHeaderId       INT           NOT NULL
+        , WorkCenterId            INT           NOT NULL
+        , WorkOrderInputDetailId  INT           NOT NULL
+        , ItemCode                NVARCHAR(60)  NULL
+        , BriefDescription        NVARCHAR(200) NULL
+        , Description             NVARCHAR(400) NULL
+        , NonStandardLength       FLOAT         NULL
+        , NonStandardWidth        FLOAT         NULL
+        , ItemStandardSizeId      INT           NULL
+        , StandardSize            NVARCHAR(100) NULL
+        , TheoreticalWeight       DECIMAL(18,2) NULL
+    );
+
+    INSERT INTO #MatRaw
+    EXEC sched.usp_Erp_OperationMaterials
+          @WarehouseId           = @WarehouseId
+        , @DueDateLow            = @DueDateLow
+        , @DueDateHigh           = @DueDateHigh
+        , @WarehouseWorkCenterId = @WarehouseWorkCenterId
+        , @Status                = @Status;
+
+    CREATE TABLE #MatStage
+    (
+          WorkOrderInputDetailId  INT           NOT NULL
+        , WorkOrderHeaderId       INT           NOT NULL
+        , WorkCenterId            INT           NOT NULL
+        , OperationKey            VARCHAR(64)   NOT NULL
+        , ItemCode                NVARCHAR(60)  NULL
+        , BriefDescription        NVARCHAR(200) NULL
+        , Description             NVARCHAR(400) NULL
+        , NonStandardLength       FLOAT         NULL
+        , NonStandardWidth        FLOAT         NULL
+        , ItemStandardSizeId      INT           NULL
+        , StandardSize            NVARCHAR(100) NULL
+        , TheoreticalWeight       DECIMAL(18,2) NULL
+        , RowHash                 VARBINARY(32) NOT NULL
+    );
+
+    INSERT INTO #MatStage
+    SELECT
+          r.WorkOrderInputDetailId
+        , r.WorkOrderHeaderId
+        , r.WorkCenterId
+        , r.OperationKey
+        , r.ItemCode
+        , r.BriefDescription
+        , r.Description
+        , r.NonStandardLength
+        , r.NonStandardWidth
+        , r.ItemStandardSizeId
+        , r.StandardSize
+        , r.TheoreticalWeight
+        , HASHBYTES('SHA2_256',
+            CONCAT(
+                CAST(r.WorkOrderInputDetailId AS NVARCHAR(20)), N'|',
+                ISNULL(r.ItemCode, N''), N'|',
+                ISNULL(r.BriefDescription, N''), N'|',
+                ISNULL(r.Description, N''), N'|',
+                ISNULL(CONVERT(NVARCHAR(50), r.NonStandardLength), N''), N'|',
+                ISNULL(CONVERT(NVARCHAR(50), r.NonStandardWidth), N''), N'|',
+                ISNULL(CAST(r.ItemStandardSizeId AS NVARCHAR(20)), N''), N'|',
+                ISNULL(r.StandardSize, N''), N'|',
+                ISNULL(CAST(r.TheoreticalWeight AS NVARCHAR(40)), N'')
+            )
+          ) AS RowHash
+    FROM #MatRaw r;
+
+    -------------------------------------------------------------------------
+    -- Upsert materials by WorkOrderInputDetailId (ERP stable key)
+    -------------------------------------------------------------------------
+    -- Upsert OperationMaterial (only update full row when hash changes)
+MERGE sched.OperationMaterial AS tgt
+USING #MatStage AS src
+ON tgt.WorkOrderInputDetailId = src.WorkOrderInputDetailId
+WHEN MATCHED AND tgt.RowHash <> src.RowHash THEN
+    UPDATE SET
+          tgt.WorkOrderHeaderId   = src.WorkOrderHeaderId
+        , tgt.WorkCenterId        = src.WorkCenterId
+        , tgt.OperationKey        = src.OperationKey
+        , tgt.ItemCode            = src.ItemCode
+        , tgt.BriefDescription    = src.BriefDescription
+        , tgt.Description         = src.Description
+        , tgt.NonStandardLength   = src.NonStandardLength
+        , tgt.NonStandardWidth    = src.NonStandardWidth
+        , tgt.ItemStandardSizeId  = src.ItemStandardSizeId
+        , tgt.StandardSize        = src.StandardSize
+        , tgt.TheoreticalWeight   = src.TheoreticalWeight
+        , tgt.RowHash             = src.RowHash
+        , tgt.LastERPRefreshUtc   = @NowUtc
+        , tgt.IsActive            = 1
+        , tgt.RemovedUtc          = NULL
+WHEN NOT MATCHED THEN
+    INSERT
+    (
+          WorkOrderInputDetailId, WorkOrderHeaderId, WorkCenterId, OperationKey,
+          ItemCode, BriefDescription, Description,
+          NonStandardLength, NonStandardWidth, ItemStandardSizeId, StandardSize, TheoreticalWeight,
+          RowHash, LastERPRefreshUtc, IsActive
+    )
+    VALUES
+    (
+          src.WorkOrderInputDetailId, src.WorkOrderHeaderId, src.WorkCenterId, src.OperationKey,
+          src.ItemCode, src.BriefDescription, src.Description,
+          src.NonStandardLength, src.NonStandardWidth, src.ItemStandardSizeId, src.StandardSize, src.TheoreticalWeight,
+          src.RowHash, @NowUtc, 1
+    );
+
+-- Touch unchanged matched rows (hash same)
+UPDATE om
+   SET om.LastERPRefreshUtc = @NowUtc,
+       om.IsActive          = 1,
+       om.RemovedUtc        = NULL
+FROM sched.OperationMaterial om
+JOIN #MatStage s
+  ON s.WorkOrderInputDetailId = om.WorkOrderInputDetailId
+WHERE om.RowHash = s.RowHash;
+
+    IF @DeactivateMissing = 1
+    BEGIN
+        UPDATE tgt
+            SET tgt.IsActive = 0,
+                tgt.RemovedUtc = COALESCE(tgt.RemovedUtc, @NowUtc)
+        FROM sched.OperationMaterial tgt
+        LEFT JOIN #MatStage src
+            ON src.WorkOrderInputDetailId = tgt.WorkOrderInputDetailId
+        WHERE src.WorkOrderInputDetailId IS NULL
+          AND tgt.IsActive = 1;
+    END
+END
+GO
+
+

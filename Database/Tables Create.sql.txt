@@ -1,0 +1,354 @@
+USE [ProdSched]
+GO
+
+/****** Object:  Table [sched].[AppUser]    Script Date: 3/5/2026 11:29:04 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [sched].[AppUser](
+	[AppUserId] [int] IDENTITY(1,1) NOT NULL,
+	[Login] [nvarchar](128) NOT NULL,
+	[DisplayName] [nvarchar](200) NULL,
+	[RoleName] [nvarchar](50) NOT NULL,
+	[IsActive] [bit] NOT NULL,
+	[CreatedUtc] [datetime2](0) NOT NULL,
+ CONSTRAINT [PK_AppUser] PRIMARY KEY CLUSTERED 
+(
+	[AppUserId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+/****** Object:  Table [sched].[ERPActionItem]    Script Date: 3/5/2026 11:29:04 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [sched].[ERPActionItem](
+	[ActionItemId] [int] IDENTITY(1,1) NOT NULL,
+	[WorkOrderHeaderId] [int] NOT NULL,
+	[ActionType] [nvarchar](50) NOT NULL,
+	[Status] [nvarchar](30) NOT NULL,
+	[AssignedToAppUserId] [int] NULL,
+	[CreatedUtc] [datetime2](0) NOT NULL,
+	[AcknowledgedUtc] [datetime2](0) NULL,
+	[ERPUpdatedUtc] [datetime2](0) NULL,
+	[ExceptionReasonCode] [nvarchar](50) NULL,
+	[Comment] [nvarchar](500) NULL,
+	[ERPReference] [nvarchar](200) NULL,
+ CONSTRAINT [PK_ERPActionItem] PRIMARY KEY CLUSTERED 
+(
+	[ActionItemId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+/****** Object:  Table [sched].[ExecutionEvent]    Script Date: 3/5/2026 11:29:04 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [sched].[ExecutionEvent](
+	[EventId] [int] IDENTITY(1,1) NOT NULL,
+	[SessionId] [int] NOT NULL,
+	[EventType] [nvarchar](20) NOT NULL,
+	[EventUtc] [datetime2](0) NOT NULL,
+	[ReasonCode] [nvarchar](50) NULL,
+	[Comment] [nvarchar](500) NULL,
+ CONSTRAINT [PK_ExecutionEvent] PRIMARY KEY CLUSTERED 
+(
+	[EventId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+/****** Object:  Table [sched].[ExecutionSession]    Script Date: 3/5/2026 11:29:04 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [sched].[ExecutionSession](
+	[SessionId] [int] IDENTITY(1,1) NOT NULL,
+	[OperationId] [int] NOT NULL,
+	[OperatorAppUserId] [int] NULL,
+	[StartUtc] [datetime2](0) NOT NULL,
+	[StopUtc] [datetime2](0) NULL,
+	[State] [nvarchar](20) NOT NULL,
+	[GoodQty] [decimal](18, 2) NULL,
+	[ScrapQty] [decimal](18, 2) NULL,
+	[CompletionNote] [nvarchar](500) NULL,
+ CONSTRAINT [PK_ExecutionSession] PRIMARY KEY CLUSTERED 
+(
+	[SessionId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+/****** Object:  Table [sched].[OperationMaterial]    Script Date: 3/5/2026 11:29:04 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [sched].[OperationMaterial](
+	[OperationMaterialId] [int] IDENTITY(1,1) NOT NULL,
+	[WorkOrderInputDetailId] [int] NOT NULL,
+	[WorkOrderHeaderId] [int] NOT NULL,
+	[WorkCenterId] [int] NOT NULL,
+	[OperationKey] [varchar](64) NOT NULL,
+	[ItemCode] [nvarchar](60) NULL,
+	[BriefDescription] [nvarchar](200) NULL,
+	[Description] [nvarchar](400) NULL,
+	[NonStandardLength] [float] NULL,
+	[NonStandardWidth] [float] NULL,
+	[ItemStandardSizeId] [int] NULL,
+	[StandardSize] [nvarchar](100) NULL,
+	[TheoreticalWeight] [decimal](18, 2) NULL,
+	[RowHash] [varbinary](32) NOT NULL,
+	[LastERPRefreshUtc] [datetime2](0) NOT NULL,
+	[IsActive] [bit] NOT NULL,
+	[RemovedUtc] [datetime2](0) NULL,
+ CONSTRAINT [PK_OperationMaterial] PRIMARY KEY CLUSTERED 
+(
+	[OperationMaterialId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UQ_OperationMaterial_WorkOrderInputDetailId] UNIQUE NONCLUSTERED 
+(
+	[WorkOrderInputDetailId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+/****** Object:  Table [sched].[OperationSnapshot]    Script Date: 3/5/2026 11:29:04 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [sched].[OperationSnapshot](
+	[OperationId] [int] IDENTITY(1,1) NOT NULL,
+	[OperationKey] [varchar](64) NOT NULL,
+	[WorkOrderHeaderId] [int] NOT NULL,
+	[WorkCenterId] [int] NOT NULL,
+	[DueDate] [datetime] NULL,
+	[InputMaterial] [nvarchar](300) NULL,
+	[Size] [nvarchar](100) NULL,
+	[DistinctInputItemCount] [int] NOT NULL,
+	[InputQuantity] [decimal](18, 2) NOT NULL,
+	[SalesOrderHeaderId] [int] NULL,
+	[SalesOrderClosedFlag] [bit] NULL,
+	[Customer] [nvarchar](200) NULL,
+	[SalesRep] [nvarchar](200) NULL,
+	[WOCreatedBy] [nvarchar](200) NULL,
+	[SalesOrderTarget] [datetime] NULL,
+	[SalesOrderReady] [datetime] NULL,
+	[PostedOrClosedFlag] [bit] NULL,
+	[IsOpenInERP]  AS (case when [PostedOrClosedFlag] IS NULL then NULL when [PostedOrClosedFlag]=(0) then CONVERT([bit],(1)) else CONVERT([bit],(0)) end) PERSISTED,
+	[RowHash] [varbinary](32) NOT NULL,
+	[LastERPRefreshUtc] [datetime2](0) NOT NULL,
+	[IsActive] [bit] NOT NULL,
+	[RemovedUtc] [datetime2](0) NULL,
+ CONSTRAINT [PK_OperationSnapshot] PRIMARY KEY CLUSTERED 
+(
+	[OperationId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UQ_OperationSnapshot_OperationKey] UNIQUE NONCLUSTERED 
+(
+	[OperationKey] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+/****** Object:  Table [sched].[ScheduleEvent]    Script Date: 3/5/2026 11:29:04 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [sched].[ScheduleEvent](
+	[ScheduleEventId] [int] IDENTITY(1,1) NOT NULL,
+	[OperationId] [int] NOT NULL,
+	[PlannedStartLocal] [datetime] NOT NULL,
+	[PlannedEndLocal] [datetime] NOT NULL,
+	[Locked] [bit] NOT NULL,
+	[ScheduledByAppUserId] [int] NULL,
+	[ScheduledUtc] [datetime2](0) NOT NULL,
+	[Status] [tinyint] NOT NULL,
+	[ActualStartLocal] [datetime] NULL,
+	[ActualEndLocal] [datetime] NULL,
+ CONSTRAINT [PK_ScheduleEvent] PRIMARY KEY CLUSTERED 
+(
+	[ScheduleEventId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+/****** Object:  Table [sched].[TimeStandard]    Script Date: 3/5/2026 11:29:04 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [sched].[TimeStandard](
+	[TimeStandardId] [int] IDENTITY(1,1) NOT NULL,
+	[WorkCenterId] [int] NOT NULL,
+	[StandardKey] [nvarchar](100) NOT NULL,
+	[SetupMinMedian] [decimal](18, 2) NULL,
+	[RunMinPerUnitMedian] [decimal](18, 4) NULL,
+	[SampleSize] [int] NOT NULL,
+	[LastUpdatedUtc] [datetime2](0) NOT NULL,
+ CONSTRAINT [PK_TimeStandard] PRIMARY KEY CLUSTERED 
+(
+	[TimeStandardId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY],
+ CONSTRAINT [UQ_TimeStandard] UNIQUE NONCLUSTERED 
+(
+	[WorkCenterId] ASC,
+	[StandardKey] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+/****** Object:  Table [sched].[WorkCenter]    Script Date: 3/5/2026 11:29:04 AM ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE TABLE [sched].[WorkCenter](
+	[WorkCenterId] [int] NOT NULL,
+	[WorkCenterName] [nvarchar](200) NOT NULL,
+	[IsActive] [bit] NOT NULL,
+	[LastSeenUtc] [datetime2](0) NOT NULL,
+ CONSTRAINT [PK_WorkCenter] PRIMARY KEY CLUSTERED 
+(
+	[WorkCenterId] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+ALTER TABLE [sched].[AppUser] ADD  CONSTRAINT [DF_AppUser_IsActive]  DEFAULT ((1)) FOR [IsActive]
+GO
+
+ALTER TABLE [sched].[AppUser] ADD  CONSTRAINT [DF_AppUser_CreatedUtc]  DEFAULT (sysutcdatetime()) FOR [CreatedUtc]
+GO
+
+ALTER TABLE [sched].[ERPActionItem] ADD  CONSTRAINT [DF_ERPActionItem_CreatedUtc]  DEFAULT (sysutcdatetime()) FOR [CreatedUtc]
+GO
+
+ALTER TABLE [sched].[OperationMaterial] ADD  CONSTRAINT [DF_OpMat_LastERPRefreshUtc]  DEFAULT (sysutcdatetime()) FOR [LastERPRefreshUtc]
+GO
+
+ALTER TABLE [sched].[OperationMaterial] ADD  CONSTRAINT [DF_OpMat_IsActive]  DEFAULT ((1)) FOR [IsActive]
+GO
+
+ALTER TABLE [sched].[OperationSnapshot] ADD  CONSTRAINT [DF_Op_DistinctInputItemCount]  DEFAULT ((0)) FOR [DistinctInputItemCount]
+GO
+
+ALTER TABLE [sched].[OperationSnapshot] ADD  CONSTRAINT [DF_Op_InputQuantity]  DEFAULT ((0)) FOR [InputQuantity]
+GO
+
+ALTER TABLE [sched].[OperationSnapshot] ADD  CONSTRAINT [DF_Op_LastERPRefreshUtc]  DEFAULT (sysutcdatetime()) FOR [LastERPRefreshUtc]
+GO
+
+ALTER TABLE [sched].[OperationSnapshot] ADD  CONSTRAINT [DF_Op_IsActive]  DEFAULT ((1)) FOR [IsActive]
+GO
+
+ALTER TABLE [sched].[ScheduleEvent] ADD  CONSTRAINT [DF_ScheduleEvent_Locked]  DEFAULT ((0)) FOR [Locked]
+GO
+
+ALTER TABLE [sched].[ScheduleEvent] ADD  CONSTRAINT [DF_ScheduleEvent_ScheduledUtc]  DEFAULT (sysutcdatetime()) FOR [ScheduledUtc]
+GO
+
+ALTER TABLE [sched].[ScheduleEvent] ADD  CONSTRAINT [DF_ScheduleEvent_Status]  DEFAULT ((0)) FOR [Status]
+GO
+
+ALTER TABLE [sched].[TimeStandard] ADD  CONSTRAINT [DF_TimeStandard_SampleSize]  DEFAULT ((0)) FOR [SampleSize]
+GO
+
+ALTER TABLE [sched].[TimeStandard] ADD  CONSTRAINT [DF_TimeStandard_LastUpdatedUtc]  DEFAULT (sysutcdatetime()) FOR [LastUpdatedUtc]
+GO
+
+ALTER TABLE [sched].[WorkCenter] ADD  CONSTRAINT [DF_WorkCenter_IsActive]  DEFAULT ((1)) FOR [IsActive]
+GO
+
+ALTER TABLE [sched].[WorkCenter] ADD  CONSTRAINT [DF_WorkCenter_LastSeenUtc]  DEFAULT (sysutcdatetime()) FOR [LastSeenUtc]
+GO
+
+ALTER TABLE [sched].[ERPActionItem]  WITH CHECK ADD  CONSTRAINT [FK_ERPActionItem_User] FOREIGN KEY([AssignedToAppUserId])
+REFERENCES [sched].[AppUser] ([AppUserId])
+GO
+
+ALTER TABLE [sched].[ERPActionItem] CHECK CONSTRAINT [FK_ERPActionItem_User]
+GO
+
+ALTER TABLE [sched].[ExecutionEvent]  WITH CHECK ADD  CONSTRAINT [FK_ExecEvent_Session] FOREIGN KEY([SessionId])
+REFERENCES [sched].[ExecutionSession] ([SessionId])
+GO
+
+ALTER TABLE [sched].[ExecutionEvent] CHECK CONSTRAINT [FK_ExecEvent_Session]
+GO
+
+ALTER TABLE [sched].[ExecutionSession]  WITH CHECK ADD  CONSTRAINT [FK_ExecSession_Operation] FOREIGN KEY([OperationId])
+REFERENCES [sched].[OperationSnapshot] ([OperationId])
+GO
+
+ALTER TABLE [sched].[ExecutionSession] CHECK CONSTRAINT [FK_ExecSession_Operation]
+GO
+
+ALTER TABLE [sched].[ExecutionSession]  WITH CHECK ADD  CONSTRAINT [FK_ExecSession_User] FOREIGN KEY([OperatorAppUserId])
+REFERENCES [sched].[AppUser] ([AppUserId])
+GO
+
+ALTER TABLE [sched].[ExecutionSession] CHECK CONSTRAINT [FK_ExecSession_User]
+GO
+
+ALTER TABLE [sched].[OperationSnapshot]  WITH CHECK ADD  CONSTRAINT [FK_OperationSnapshot_WorkCenter] FOREIGN KEY([WorkCenterId])
+REFERENCES [sched].[WorkCenter] ([WorkCenterId])
+GO
+
+ALTER TABLE [sched].[OperationSnapshot] CHECK CONSTRAINT [FK_OperationSnapshot_WorkCenter]
+GO
+
+ALTER TABLE [sched].[ScheduleEvent]  WITH CHECK ADD  CONSTRAINT [FK_ScheduleEvent_Operation] FOREIGN KEY([OperationId])
+REFERENCES [sched].[OperationSnapshot] ([OperationId])
+GO
+
+ALTER TABLE [sched].[ScheduleEvent] CHECK CONSTRAINT [FK_ScheduleEvent_Operation]
+GO
+
+ALTER TABLE [sched].[ScheduleEvent]  WITH CHECK ADD  CONSTRAINT [FK_ScheduleEvent_User] FOREIGN KEY([ScheduledByAppUserId])
+REFERENCES [sched].[AppUser] ([AppUserId])
+GO
+
+ALTER TABLE [sched].[ScheduleEvent] CHECK CONSTRAINT [FK_ScheduleEvent_User]
+GO
+
+ALTER TABLE [sched].[TimeStandard]  WITH CHECK ADD  CONSTRAINT [FK_TimeStandard_WorkCenter] FOREIGN KEY([WorkCenterId])
+REFERENCES [sched].[WorkCenter] ([WorkCenterId])
+GO
+
+ALTER TABLE [sched].[TimeStandard] CHECK CONSTRAINT [FK_TimeStandard_WorkCenter]
+GO
+
+ALTER TABLE [sched].[ScheduleEvent]  WITH CHECK ADD  CONSTRAINT [CK_ScheduleEvent_Status] CHECK  (([Status]=(2) OR [Status]=(1) OR [Status]=(0)))
+GO
+
+ALTER TABLE [sched].[ScheduleEvent] CHECK CONSTRAINT [CK_ScheduleEvent_Status]
+GO
+
+
