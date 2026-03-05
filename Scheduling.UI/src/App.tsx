@@ -19,7 +19,7 @@ type BucketOp = {
 };
 
 type CalendarEvent = {
-  id: number | string;
+  id: string; // <-- must be string for TS/FullCalendar
   title: string;
   start: string;
   end: string;
@@ -346,230 +346,252 @@ function DispatchBoard() {
         `}</style>
 
         <div style={{ marginTop: 10 }}>
-          <FullCalendar
-            ref={calendarRef}
-            plugins={[timeGridPlugin, interactionPlugin]}
-            initialView="timeGridDay"
-            headerToolbar={{
-              left: "prev,next today",
-              center: "title",
-              right: "timeGridDay,timeGridWeek",
-            }}
-            height="auto"
-            expandRows={true}
-            nowIndicator={true}
-            allDaySlot={false}
-            slotMinTime="00:00:00"
-            slotMaxTime="24:00:00"
-            slotDuration="00:15:00"
-            snapDuration="00:15:00"
-            slotLabelInterval="01:00:00"
-            editable={true}
-            droppable={true}
-            eventResizableFromStart={true}
-            slotEventOverlap={false}
-            eventOverlap={(stillEvent, movingEvent) => {
-              if (stillEvent.display === "background" || movingEvent.display === "background") return true;
-              return false;
-            }}
 
-            // status styling
-            eventClassNames={(arg) => {
-              const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
-              if (s === 2) return ["evt-done"];
-              if (s === 1) return ["evt-running"];
-              return ["evt-scheduled"];
-            }}
-            eventDidMount={(arg) => {
-              const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
-              const label = s === 2 ? "Done" : s === 1 ? "Running" : "Scheduled";
-              arg.el.title = `${arg.event.title}\nStatus: ${label}`;
-            }}
+         <FullCalendar
+  ref={calendarRef}
+  plugins={[timeGridPlugin, interactionPlugin]}
+  initialView="timeGridDay"
+  headerToolbar={{
+    left: "prev,next today",
+    center: "title",
+    right: "timeGridDay,timeGridWeek",
+  }}
+  height="auto"
+  expandRows={true}
+  nowIndicator={true}
+  allDaySlot={false}
+  slotMinTime="00:00:00"
+  slotMaxTime="24:00:00"
+  slotDuration="00:15:00"
+  snapDuration="00:15:00"
+  slotLabelInterval="01:00:00"
+  editable={true}
+  droppable={true}
+  eventResizableFromStart={true}
+  slotEventOverlap={false}
 
-            // running jobs cannot move, but can resize (duration)
-            eventStartEditable={(arg) => {
-              const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
-              return s !== 1;
-            }}
-            eventDurationEditable={() => true}
+  // Allow overlap ONLY with background shift blocks
+  eventOverlap={(stillEvent, movingEvent) => {
+    if (stillEvent.display === "background") return true;
+    if (!movingEvent) return false;
+    if (movingEvent.display === "background") return true;
+    return false;
+  }}
 
-            // IMPORTANT: do NOT block running jobs here, because eventAllow also affects resize
-            eventAllow={() => true}
+  // Status styling
+  eventClassNames={(arg) => {
+    const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
+    if (s === 2) return ["evt-done"];
+    if (s === 1) return ["evt-running"];
+    return ["evt-scheduled"];
+  }}
+  eventDidMount={(arg) => {
+    const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
+    const label = s === 2 ? "Done" : s === 1 ? "Running" : "Scheduled";
+    arg.el.title = `${arg.event.title}\nStatus: ${label}`;
+  }}
 
-            // ✅ Unschedule: drag from calendar onto left panel
-            eventDragStop={async (info) => {
-              try {
-                const panel = bucketPanelRef.current;
-                if (!panel) return;
+  // These props are booleans in FullCalendar typings
+  eventStartEditable={true}
+  eventDurationEditable={true}
 
-                const rect = panel.getBoundingClientRect();
-                const x = info.jsEvent.clientX;
-                const y = info.jsEvent.clientY;
+  // UNSCHEDULE: drag from calendar onto left panel
+  eventDragStop={async (info) => {
+    try {
+      const panel = bucketPanelRef.current;
+      if (!panel) return;
 
-                if (!pointInRect(x, y, rect)) return;
+      const rect = panel.getBoundingClientRect();
+      const x = info.jsEvent.clientX;
+      const y = info.jsEvent.clientY;
 
-                const s = (info.event.extendedProps.status as number | undefined) ?? 0;
-                if (s === 1) {
-                  alert("This job is running. Stop it before unscheduling.");
-                  // No revert() on dragStop — just reload from DB
-                  calendarRef.current?.getApi().refetchEvents();
-                  return;
-                }
+      if (!pointInRect(x, y, rect)) return;
 
-                const scheduleEventId = Number(info.event.id);
-                if (!scheduleEventId || Number.isNaN(scheduleEventId)) {
-                  calendarRef.current?.getApi().refetchEvents();
-                  return;
-                }
+      const s = (info.event.extendedProps.status as number | undefined) ?? 0;
+      if (s === 1) {
+        alert("This job is running. Stop it before unscheduling.");
+        calendarRef.current?.getApi().refetchEvents();
+        return;
+      }
 
-                const resp = await fetch(`${apiBase}/api/schedule/${scheduleEventId}`, {
-                  method: "DELETE",
-                });
+      const scheduleEventId = Number(info.event.id);
+      if (!scheduleEventId || Number.isNaN(scheduleEventId)) {
+        calendarRef.current?.getApi().refetchEvents();
+        return;
+      }
 
-                if (!resp.ok) {
-                  alert((await resp.text()) || "Unschedule failed.");
-                  calendarRef.current?.getApi().refetchEvents();
-                  return;
-                }
+      const resp = await fetch(`${apiBase}/api/schedule/${scheduleEventId}`, {
+        method: "DELETE",
+      });
 
-                info.event.remove();
-                if (workCenterId) await loadBucket(workCenterId);
-                calendarRef.current?.getApi().refetchEvents();
-              } catch (e) {
-                alert(`Unschedule failed: ${String(e)}`);
-                calendarRef.current?.getApi().refetchEvents();
-              }
-            }}
+      if (!resp.ok) {
+        alert((await resp.text()) || "Unschedule failed.");
+        calendarRef.current?.getApi().refetchEvents();
+        return;
+      }
 
-            eventDrop={async (info) => {
-              try {
-                const scheduleEventId = Number(info.event.id);
-                if (!scheduleEventId || Number.isNaN(scheduleEventId)) {
-                  info.revert();
-                  return;
-                }
+      info.event.remove();
+      if (workCenterId) await loadBucket(workCenterId);
+      calendarRef.current?.getApi().refetchEvents();
+    } catch (e) {
+      alert(`Unschedule failed: ${String(e)}`);
+      calendarRef.current?.getApi().refetchEvents();
+    }
+  }}
 
-                if (!info.event.end) {
-                  info.event.setEnd(new Date(info.event.start!.getTime() + 60 * 60 * 1000));
-                }
+  // MOVE: block if running
+  eventDrop={async (info) => {
+    const s = (info.event.extendedProps.status as number | undefined) ?? 0;
+    if (s === 1) {
+      info.revert();
+      alert("This job is running. You can only resize it (change duration).");
+      return;
+    }
 
-                const resp = await fetch(`${apiBase}/api/schedule/${scheduleEventId}`, {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    operationId: info.event.extendedProps.operationId,
-                    plannedStartLocal: toLocalSqlDateTimeString(info.event.start!),
-                    plannedEndLocal: toLocalSqlDateTimeString(info.event.end!),
-                  }),
-                });
+    try {
+      const scheduleEventId = Number(info.event.id);
+      if (!scheduleEventId || Number.isNaN(scheduleEventId)) {
+        info.revert();
+        return;
+      }
 
-                if (!resp.ok) {
-                  info.revert();
-                  alert(await resp.text());
-                  return;
-                }
+      if (!info.event.end) {
+        info.event.setEnd(new Date(info.event.start!.getTime() + 60 * 60 * 1000));
+      }
 
-                calendarRef.current?.getApi().refetchEvents();
-              } catch (e) {
-                info.revert();
-                alert(`Move failed: ${String(e)}`);
-              }
-            }}
+      const resp = await fetch(`${apiBase}/api/schedule/${scheduleEventId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operationId: info.event.extendedProps.operationId,
+          plannedStartLocal: toLocalSqlDateTimeString(info.event.start!),
+          plannedEndLocal: toLocalSqlDateTimeString(info.event.end!),
+        }),
+      });
 
-            eventResize={async (info) => {
-              try {
-                const scheduleEventId = Number(info.event.id);
-                if (!scheduleEventId || Number.isNaN(scheduleEventId)) {
-                  info.revert();
-                  return;
-                }
-                if (!info.event.end) {
-                  info.revert();
-                  return;
-                }
+      if (!resp.ok) {
+        info.revert();
+        alert(await resp.text());
+        return;
+      }
 
-                const resp = await fetch(`${apiBase}/api/schedule/${scheduleEventId}`, {
-                  method: "PUT",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    operationId: info.event.extendedProps.operationId,
-                    plannedStartLocal: toLocalSqlDateTimeString(info.event.start!),
-                    plannedEndLocal: toLocalSqlDateTimeString(info.event.end!),
-                  }),
-                });
+      calendarRef.current?.getApi().refetchEvents();
+    } catch (e) {
+      info.revert();
+      alert(`Move failed: ${String(e)}`);
+    }
+  }}
 
-                if (!resp.ok) {
-                  info.revert();
-                  alert(await resp.text());
-                  return;
-                }
+  // RESIZE: allow even if running
+  eventResize={async (info) => {
+    try {
+      const scheduleEventId = Number(info.event.id);
+      if (!scheduleEventId || Number.isNaN(scheduleEventId)) {
+        info.revert();
+        return;
+      }
+      if (!info.event.end) {
+        info.revert();
+        return;
+      }
 
-                calendarRef.current?.getApi().refetchEvents();
-              } catch (e) {
-                info.revert();
-                alert(`Resize failed: ${String(e)}`);
-              }
-            }}
+      const resp = await fetch(`${apiBase}/api/schedule/${scheduleEventId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operationId: info.event.extendedProps.operationId,
+          plannedStartLocal: toLocalSqlDateTimeString(info.event.start!),
+          plannedEndLocal: toLocalSqlDateTimeString(info.event.end!),
+        }),
+      });
 
-            eventSources={[
-              {
-                id: "shifts",
-                events: (info, success) => success(buildShiftBackgroundEvents(info.start, info.end)),
-              },
-            ]}
-            events={async (info, success, failure) => {
-              try {
-                if (!workCenterId) return success([]);
-                const url =
-                  `${apiBase}/api/schedule?workCenterId=${workCenterId}` +
-                  `&start=${encodeURIComponent(info.startStr)}` +
-                  `&end=${encodeURIComponent(info.endStr)}`;
-                const res = await fetch(url);
-                if (!res.ok) throw new Error(await res.text());
-                const data = (await res.json()) as CalendarEvent[];
-                success(data);
-              } catch (e) {
-                failure(e);
-              }
-            }}
-            eventClick={(clickInfo) => {
-              const opId = clickInfo.event.extendedProps.operationId as number | undefined;
-              if (opId) openDetail(opId);
-            }}
-            eventReceive={async (info) => {
-              try {
-                const operationId = info.event.extendedProps.operationId as number;
+      if (!resp.ok) {
+        info.revert();
+        alert(await resp.text());
+        return;
+      }
 
-                if (!info.event.end) {
-                  info.event.setEnd(new Date(info.event.start!.getTime() + 60 * 60 * 1000));
-                }
+      calendarRef.current?.getApi().refetchEvents();
+    } catch (e) {
+      info.revert();
+      alert(`Resize failed: ${String(e)}`);
+    }
+  }}
 
-                const resp = await fetch(`${apiBase}/api/schedule`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    operationId,
-                    plannedStartLocal: toLocalSqlDateTimeString(info.event.start!),
-                    plannedEndLocal: toLocalSqlDateTimeString(info.event.end!),
-                  }),
-                });
+  eventSources={[
+    {
+      id: "shifts",
+      events: (info, success) => success(buildShiftBackgroundEvents(info.start, info.end)),
+    },
+  ]}
 
-                if (!resp.ok) {
-                  info.revert();
-                  alert(await resp.text());
-                  return;
-                }
+  events={async (info, success, failure) => {
+    try {
+      if (!workCenterId) return success([]);
 
-                // remove temp client event and refetch from DB
-                info.event.remove();
-                calendarRef.current?.getApi().refetchEvents();
-                if (workCenterId) loadBucket(workCenterId);
-              } catch (e) {
-                info.revert();
-                alert(`Schedule create failed: ${String(e)}`);
-              }
-            }}
-          />
+      const url =
+        `${apiBase}/api/schedule?workCenterId=${workCenterId}` +
+        `&start=${encodeURIComponent(info.startStr)}` +
+        `&end=${encodeURIComponent(info.endStr)}`;
+
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(await res.text());
+
+      const raw = (await res.json()) as CalendarEvent[];
+
+      const data = raw.map((e) => ({
+        ...e,
+        id: String(e.id)
+      }));
+
+      success(data);
+
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      failure(err);
+    }
+  }}
+
+  eventClick={(clickInfo) => {
+    const opId = clickInfo.event.extendedProps.operationId as number | undefined;
+    if (opId) openDetail(opId);
+  }}
+
+  eventReceive={async (info) => {
+    try {
+      const operationId = info.event.extendedProps.operationId as number;
+
+      if (!info.event.end) {
+        info.event.setEnd(new Date(info.event.start!.getTime() + 60 * 60 * 1000));
+      }
+
+      const resp = await fetch(`${apiBase}/api/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operationId,
+          plannedStartLocal: toLocalSqlDateTimeString(info.event.start!),
+          plannedEndLocal: toLocalSqlDateTimeString(info.event.end!),
+        }),
+      });
+
+      if (!resp.ok) {
+        info.revert();
+        alert(await resp.text());
+        return;
+      }
+
+      // Remove temp client event and reload from DB
+      info.event.remove();
+      calendarRef.current?.getApi().refetchEvents();
+      if (workCenterId) loadBucket(workCenterId);
+    } catch (e) {
+      info.revert();
+      alert(`Schedule create failed: ${String(e)}`);
+    }
+  }}
+/>
+
         </div>
       </div>
 
