@@ -1,1 +1,32 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
 
+# Visual Studio
+.vs/
+
+# Node
+node_modules/
+dist/
+build/
+
+# Vite
+.vite/
+
+# Logs
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# SQL backups
+*.bak
+*.trn
