@@ -48,7 +48,6 @@ type OperationDetail = {
 const apiBase = import.meta.env.VITE_API_BASE as string;
 
 function toLocalSqlDateTimeString(d: Date) {
-  // Converts a JS Date to "YYYY-MM-DDTHH:mm:ss" using LOCAL wall-clock time
   const pad = (n: number) => String(n).padStart(2, "0");
   return (
     `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
@@ -56,16 +55,17 @@ function toLocalSqlDateTimeString(d: Date) {
   );
 }
 
+function pointInRect(x: number, y: number, rect: DOMRect) {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+}
+
 function buildShiftBackgroundEvents(rangeStart: Date, rangeEnd: Date) {
   const events: any[] = [];
-
-  // Start one day earlier so we include overnight night shift (17:00 yesterday -> 05:00 today)
   const d = new Date(rangeStart);
   d.setHours(0, 0, 0, 0);
   d.setDate(d.getDate() - 1);
 
   while (d < rangeEnd) {
-    // Day shift: 05:00 -> 17:00
     const dayShiftStart = new Date(d);
     dayShiftStart.setHours(5, 0, 0, 0);
     const dayShiftEnd = new Date(d);
@@ -78,7 +78,6 @@ function buildShiftBackgroundEvents(rangeStart: Date, rangeEnd: Date) {
       classNames: ["shift-day"],
     });
 
-    // Night shift: 17:00 -> next day 05:00
     const nightStart = new Date(d);
     nightStart.setHours(17, 0, 0, 0);
     const nextDay = new Date(d);
@@ -111,6 +110,9 @@ function DispatchBoard() {
   const bucketRef = useRef<HTMLDivElement | null>(null);
   const calendarRef = useRef<FullCalendar | null>(null);
 
+  // ✅ This is the drop zone for unscheduling
+  const bucketPanelRef = useRef<HTMLDivElement | null>(null);
+
   const selectedWC = useMemo(
     () => workCenters.find((w) => w.WorkCenterId === workCenterId) ?? null,
     [workCenters, workCenterId]
@@ -121,7 +123,6 @@ function DispatchBoard() {
     const res = await fetch(`${apiBase}/api/workcenters`);
     if (!res.ok) throw new Error(await res.text());
     const data = (await res.json()) as WorkCenter[];
-
     setWorkCenters(data);
     if (!workCenterId && data.length) setWorkCenterId(data[0].WorkCenterId);
     setStatus("");
@@ -129,9 +130,7 @@ function DispatchBoard() {
 
   async function loadBucket(wcId: number) {
     setStatus("Loading bucket...");
-    const res = await fetch(
-      `${apiBase}/api/operations?workCenterId=${wcId}&scheduled=false`
-    );
+    const res = await fetch(`${apiBase}/api/operations?workCenterId=${wcId}&scheduled=false`);
     if (!res.ok) throw new Error(await res.text());
     const data = (await res.json()) as BucketOp[];
     setBucketOps(data);
@@ -152,12 +151,12 @@ function DispatchBoard() {
     }
   }
 
+  // Poll calendar events (no navigation reset)
   useEffect(() => {
     const api = calendarRef.current?.getApi();
     if (!api) return;
 
     let inFlight = false;
-
     const tick = async () => {
       if (document.hidden) return;
       if (inFlight) return;
@@ -165,18 +164,12 @@ function DispatchBoard() {
       try {
         api.refetchEvents();
       } finally {
-        // give FullCalendar a moment; then allow next tick
         window.setTimeout(() => (inFlight = false), 500);
       }
     };
 
-    const intervalMs = 15000;
-    const t = window.setInterval(tick, intervalMs);
-
-    // also refresh immediately when user comes back to the tab
-    const onVis = () => {
-      if (!document.hidden) api.refetchEvents();
-    };
+    const t = window.setInterval(tick, 15000);
+    const onVis = () => !document.hidden && api.refetchEvents();
     document.addEventListener("visibilitychange", onVis);
 
     return () => {
@@ -185,15 +178,11 @@ function DispatchBoard() {
     };
   }, []);
 
+  // Poll bucket occasionally
   useEffect(() => {
-  if (!workCenterId) return;
-
-  const intervalMs = 30000;
-  const t = window.setInterval(() => {
-    loadBucket(workCenterId);
-  }, intervalMs);
-
-  return () => window.clearInterval(t);
+    if (!workCenterId) return;
+    const t = window.setInterval(() => loadBucket(workCenterId), 30000);
+    return () => window.clearInterval(t);
   }, [workCenterId]);
 
   useEffect(() => {
@@ -237,8 +226,11 @@ function DispatchBoard() {
 
   return (
     <div style={{ display: "flex", height: "100vh", fontFamily: "Segoe UI, Arial" }}>
-      {/* LEFT: Bucket */}
-      <div style={{ width: 420, borderRight: "1px solid #ddd", padding: 12, overflow: "auto" }}>
+      {/* LEFT: Bucket (also our unschedule drop-zone) */}
+      <div
+        ref={bucketPanelRef}
+        style={{ width: 420, borderRight: "1px solid #ddd", padding: 12, overflow: "auto" }}
+      >
         <h2 style={{ margin: 0, fontSize: 18 }}>Dispatch Board</h2>
 
         <div style={{ marginTop: 6, fontSize: 12, color: "#666" }}>
@@ -276,16 +268,17 @@ function DispatchBoard() {
           Bucket (unscheduled): {bucketOps.length}
         </div>
 
+        <div style={{ marginTop: 8, fontSize: 12, color: "#666" }}>
+          Tip: Drag a scheduled job back onto this left panel to unschedule it.
+        </div>
+
         {status && (
           <div style={{ marginTop: 10, color: "#b00", fontSize: 12, whiteSpace: "pre-wrap" }}>
             {status}
           </div>
         )}
 
-        <div
-          ref={bucketRef}
-          style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}
-        >
+        <div ref={bucketRef} style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
           {bucketOps.map((op) => (
             <div
               key={op.OperationId}
@@ -338,19 +331,15 @@ function DispatchBoard() {
           .shift-day { background: rgba(0,0,0,0.03); pointer-events: none; }
           .shift-night { background: rgba(0,0,0,0.07); pointer-events: none; }
 
-          /* Scheduler status styling */
           .fc .evt-running {
             outline: 4px solid rgba(180,83,9,0.85);
             outline-offset: -2px;
             font-weight: 800;
           }
-
           .fc .evt-done {
             opacity: 0.55;
             text-decoration: line-through;
           }
-
-          /* Add a RUNNING badge */
           .fc .evt-running .fc-event-title::before {
             content: "RUNNING • ";
           }
@@ -368,17 +357,6 @@ function DispatchBoard() {
             }}
             height="auto"
             expandRows={true}
-            eventClassNames={(arg) => {
-            const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
-              if (s === 2) return ["evt-done"];
-              if (s === 1) return ["evt-running"];
-              return ["evt-scheduled"];
-              }}
-              eventDidMount={(arg) => {
-                const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
-                const label = s === 2 ? "Done" : s === 1 ? "Running" : "Scheduled";
-                arg.el.title = `${arg.event.title}\nStatus: ${label}`;
-                }}
             nowIndicator={true}
             allDaySlot={false}
             slotMinTime="00:00:00"
@@ -386,22 +364,83 @@ function DispatchBoard() {
             slotDuration="00:15:00"
             snapDuration="00:15:00"
             slotLabelInterval="01:00:00"
-            eventStartEditable={(arg) => {
-                  const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
-                  // status 1 = running -> NOT draggable/movable
-                  return s !== 1;
-                }}
-            eventAllow={(dropInfo, draggedEvent) => {
-                const s = (draggedEvent.extendedProps.status as number | undefined) ?? 0;
-                if (s === 1) return false;
-                return true;
-              }}
-
-            eventDurationEditable={(arg) => {
-              const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
-              // allow resizing even if running
-              return true;
+            editable={true}
+            droppable={true}
+            eventResizableFromStart={true}
+            slotEventOverlap={false}
+            eventOverlap={(stillEvent, movingEvent) => {
+              if (stillEvent.display === "background" || movingEvent.display === "background") return true;
+              return false;
             }}
+
+            // status styling
+            eventClassNames={(arg) => {
+              const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
+              if (s === 2) return ["evt-done"];
+              if (s === 1) return ["evt-running"];
+              return ["evt-scheduled"];
+            }}
+            eventDidMount={(arg) => {
+              const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
+              const label = s === 2 ? "Done" : s === 1 ? "Running" : "Scheduled";
+              arg.el.title = `${arg.event.title}\nStatus: ${label}`;
+            }}
+
+            // running jobs cannot move, but can resize (duration)
+            eventStartEditable={(arg) => {
+              const s = (arg.event.extendedProps.status as number | undefined) ?? 0;
+              return s !== 1;
+            }}
+            eventDurationEditable={() => true}
+
+            // IMPORTANT: do NOT block running jobs here, because eventAllow also affects resize
+            eventAllow={() => true}
+
+            // ✅ Unschedule: drag from calendar onto left panel
+            eventDragStop={async (info) => {
+              try {
+                const panel = bucketPanelRef.current;
+                if (!panel) return;
+
+                const rect = panel.getBoundingClientRect();
+                const x = info.jsEvent.clientX;
+                const y = info.jsEvent.clientY;
+
+                if (!pointInRect(x, y, rect)) return;
+
+                const s = (info.event.extendedProps.status as number | undefined) ?? 0;
+                if (s === 1) {
+                  alert("This job is running. Stop it before unscheduling.");
+                  // No revert() on dragStop — just reload from DB
+                  calendarRef.current?.getApi().refetchEvents();
+                  return;
+                }
+
+                const scheduleEventId = Number(info.event.id);
+                if (!scheduleEventId || Number.isNaN(scheduleEventId)) {
+                  calendarRef.current?.getApi().refetchEvents();
+                  return;
+                }
+
+                const resp = await fetch(`${apiBase}/api/schedule/${scheduleEventId}`, {
+                  method: "DELETE",
+                });
+
+                if (!resp.ok) {
+                  alert((await resp.text()) || "Unschedule failed.");
+                  calendarRef.current?.getApi().refetchEvents();
+                  return;
+                }
+
+                info.event.remove();
+                if (workCenterId) await loadBucket(workCenterId);
+                calendarRef.current?.getApi().refetchEvents();
+              } catch (e) {
+                alert(`Unschedule failed: ${String(e)}`);
+                calendarRef.current?.getApi().refetchEvents();
+              }
+            }}
+
             eventDrop={async (info) => {
               try {
                 const scheduleEventId = Number(info.event.id);
@@ -430,7 +469,6 @@ function DispatchBoard() {
                   return;
                 }
 
-                // Keep UI aligned with DB
                 calendarRef.current?.getApi().refetchEvents();
               } catch (e) {
                 info.revert();
@@ -445,7 +483,6 @@ function DispatchBoard() {
                   info.revert();
                   return;
                 }
-
                 if (!info.event.end) {
                   info.revert();
                   return;
@@ -473,21 +510,11 @@ function DispatchBoard() {
                 alert(`Resize failed: ${String(e)}`);
               }
             }}
-            editable={true}
-            droppable={true}
-            eventResizableFromStart={true}
-            eventOverlap={(stillEvent, movingEvent) => {
-              if (stillEvent.display === "background" || movingEvent.display === "background")
-                return true;
-              return false;
-            }}
-            slotEventOverlap={false}
-            eventAllow={() => true}
+
             eventSources={[
               {
                 id: "shifts",
-                events: (info, success) =>
-                  success(buildShiftBackgroundEvents(info.start, info.end)),
+                events: (info, success) => success(buildShiftBackgroundEvents(info.start, info.end)),
               },
             ]}
             events={async (info, success, failure) => {
@@ -533,12 +560,9 @@ function DispatchBoard() {
                   return;
                 }
 
-                // Remove the client-side "temp" event and re-load from DB
+                // remove temp client event and refetch from DB
                 info.event.remove();
-
-                const api = calendarRef.current?.getApi();
-                api?.refetchEvents();
-
+                calendarRef.current?.getApi().refetchEvents();
                 if (workCenterId) loadBucket(workCenterId);
               } catch (e) {
                 info.revert();

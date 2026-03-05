@@ -120,6 +120,21 @@ ORDER BY se.PlannedStartLocal;";
 })
 .WithName("GetSchedule");
 
+app.MapPost("/api/admin/sync-capstone", async (SqlConnection db) =>
+{
+    // Optional: prevent accidental double-click overlap
+    // (basic approach: single app instance - OK for MVP)
+
+    // Run the proc
+    // NOTE: replace proc name if yours differs
+    await db.ExecuteAsync("EXEC sched.usp_SyncFromERP;");
+
+    // Return server timestamp (from SQL) so UI shows authoritative time
+    var ranAt = await db.QuerySingleAsync<DateTime>("SELECT GETDATE();");
+    return Results.Ok(new { ok = true, ranAt });
+})
+.WithName("SyncCapstone");
+
 app.MapPost("/api/schedule", async (ScheduleUpsertRequest req, SqlConnection db) =>
 {
     if (req.PlannedEndLocal <= req.PlannedStartLocal)

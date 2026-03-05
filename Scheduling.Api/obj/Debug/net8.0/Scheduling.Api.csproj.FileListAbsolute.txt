@@ -76,3 +76,4 @@ C:\SchedulingApp\Scheduling.Api\obj\Debug\net8.0\refint\Scheduling.Api.dll
 C:\SchedulingApp\Scheduling.Api\obj\Debug\net8.0\Scheduling.Api.pdb
 C:\SchedulingApp\Scheduling.Api\obj\Debug\net8.0\Scheduling.Api.genruntimeconfig.cache
 C:\SchedulingApp\Scheduling.Api\obj\Debug\net8.0\ref\Scheduling.Api.dll
+C:\SchedulingApp\Scheduling.Api\obj\Debug\net8.0\Scheduling.Api.sourcelink.json
