@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 
 type WorkCenter = { WorkCenterId: number; WorkCenterName: string };
 
@@ -143,9 +143,11 @@ export default function OperatorBoard() {
           <button onClick={() => loadSchedule()} style={{ padding: "8px 12px" }}>
             Refresh
           </button>
+          {/*
           <Link to="/" style={{ fontSize: 12, color: "#0b5" }}>
             Scheduler Board
           </Link>
+          */}
         </div>
       </div>
 
