@@ -1,0 +1,1 @@
+sqlcmd -S D44\SQLEXPRESS -d ProdSched -Q "EXEC sched.usp_SyncFromERP"
